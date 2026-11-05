@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Migration Flows</title>
+<style>
+:root{--bg:#f6f5f1;--fg:#1b1b1f;--muted:#6b6b73;--panel:#ffffff;--line:#d9d7cf;--accent:#e4572e;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b0b0f;--fg:#f2f2f5;--muted:#8d8d98;--panel:#16161d;--line:#2a2a35;--accent:#ff7a59;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0b0b0f;--fg:#f2f2f5;--muted:#8d8d98;--panel:#16161d;--line:#2a2a35;--accent:#ff7a59;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5}
+.wrap{max-width:1000px;margin:0 auto;padding:28px 16px 40px}
+h1{font-size:clamp(28px,5vw,44px);margin:0;letter-spacing:-.03em}
+h1 b{color:var(--accent)}
+.sub{color:var(--muted);margin:6px 0 20px;max-width:60ch}
+.panel{display:flex;flex-wrap:wrap;gap:16px 24px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:16px;align-items:center}
+.panel label{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+.panel select,.panel button{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit;font-size:14px}
+.panel input[type=range]{accent-color:var(--accent);width:130px}
+#info{min-height:28px;font-size:15px;margin-bottom:6px}
+#info b{color:var(--accent)}
+.chart{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px}
+svg{width:100%;height:auto;display:block}
+svg text{fill:var(--fg);font-size:11px}
+.node{cursor:pointer}
+.ribbon{transition:opacity .15s}
+.foot{color:var(--muted);font-size:12px;margin-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>people<b>movin</b>-style flows</h1>
+  <p class="sub">Top international migration corridors (2020, foreign-born definition). Hover a country or a ribbon to explore.</p>
+
+  <div class="panel">
+    <label>Palette<select id="palette"></select></label>
+    <label>Corridors shown: <span id="nv">30</span><input id="topn" type="range" min="8" max="40" value="30"></label>
+    <label>Ribbon opacity<input id="op" type="range" min="10" max="90" value="45"></label>
+    <label>Node gap<input id="gap" type="range" min="0" max="20" value="6"></label>
+    <label>Theme<select id="theme"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+  </div>
+
+  <div id="info">Hover a country or a ribbon.</div>
+  <div class="chart"><svg id="svg" role="img" aria-label="Migration flows between countries"></svg></div>
+  <p class="foot">Node size = sum of the corridors shown, not each country’s full total. Data: World Bank Global Bilateral Migration Matrix (2020). Edit the CONFIG, PALETTES and DATA blocks in the script to customise.</p>
+</div>
+
+<script>
+// ===== CONFIG: change these to restyle =====
+const CONFIG = { width: 900, height: 620, margin: 150, nodeWidth: 12, topN: 30, opacity: 0.45, gap: 6, palette: "aurora" };
+const PALETTES = {
+  aurora: ["#4cc9f0","#4895ef","#4361ee","#7209b7","#f72585","#ff7a59","#ffb703","#2ec4b6","#90be6d","#b5179e"],
+  sunset: ["#ff595e","#ff924c","#ffca3a","#c5ca30","#8ac926","#52a675","#1982c4","#4267ac","#6a4c93","#b5179e"],
+  mono:   ["#e4572e","#f08a5d","#c9ada7","#9a8c98","#4a4e69","#22223b","#ffb703","#fb8500","#8ecae6","#219ebc"]
+};
+// ===== DATA: [origin, destination, migrants] (top corridors, World Bank 2020) =====
+const DATA = [
+["Mexico","USA",11416180],["India","UAE",3471300],["Syria","Turkey",3392819],["Russia","Ukraine",3330586],
+["Ukraine","Russia",3268265],["Afghanistan","Iran",2710600],["India","USA",2673399],["Kazakhstan","Russia",2558907],
+["India","Saudi Arabia",2502337],["Bangladesh","India",2488471],["Russia","Kazakhstan",2476019],["China","Hong Kong",2408447],
+["Palestine","Jordan",2272412],["China","USA",2272296],["Philippines","USA",2134086],["Myanmar","Thailand",1848270],
+["Poland","Germany",1820505],["Venezuela","Colombia",1780487],["Indonesia","Saudi Arabia",1709317],["Afghanistan","Pakistan",1598224],
+["India","Pakistan",1597134],["Turkey","Germany",1562939],["Pakistan","Saudi Arabia",1483736],["El Salvador","USA",1419749],
+["Vietnam","USA",1403269],["Algeria","France",1381927],["Burkina Faso","Côte d’Ivoire",1376349],["India","Oman",1375667],
+["Cuba","USA",1347526],["Romania","Italy",1280122],["Bangladesh","Saudi Arabia",1277625],["UK","Australia",1252329],
+["Indonesia","Malaysia",1241634],["Dominican Rep.","USA",1204117],["Germany","USA",1164059],["India","Kuwait",1152175],
+["Uzbekistan","Russia",1146175],["Malaysia","Singapore",1132924],["South Korea","USA",1122483],["Bangladesh","UAE",1095230]
+];
+
+const svg = document.getElementById("svg"), info = document.getElementById("info");
+const NS = "http://www.w3.org/2000/svg";
+const fmt = n => n >= 1e6 ? (n/1e6).toFixed(2).replace(/\.?0+$/,"") + "M" : Math.round(n/1e3) + "K";
+const el = (t, a, p) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); if (p) p.appendChild(e); return e; };
+
+function render() {
+  const { width: W, height: H, margin: M, nodeWidth: NW, gap, opacity } = CONFIG;
+  const flows = DATA.slice(0, CONFIG.topN).map(([o,d,v]) => ({o,d,v}));
+  const total = flows.reduce((s,f) => s + f.v, 0);
+  const side = key => {
+    const m = new Map(); flows.forEach(f => m.set(f[key], (m.get(f[key])||0) + f.v));
+    return [...m].map(([name,v]) => ({name,v})).sort((a,b) => b.v - a.v);
+  };
+  const L = side("o"), R = side("d");
+  const scale = (H - gap * (Math.max(L.length, R.length) - 1)) / total;
+  const place = nodes => { let y = 0; nodes.forEach(n => { n.y = y; n.h = n.v * scale; n.cur = y; y += n.h + gap; }); };
+  place(L); place(R);
+  const lIdx = new Map(L.map((n,i) => [n.name,i])), rIdx = new Map(R.map((n,i) => [n.name,i]));
+  const pal = PALETTES[CONFIG.palette];
+  L.forEach((n,i) => n.color = pal[i % pal.length]);
+  const lNode = new Map(L.map(n => [n.name,n])), rNode = new Map(R.map(n => [n.name,n]));
+
+  // order ribbons inside nodes to reduce crossings
+  flows.sort((a,b) => rIdx.get(a.d) - rIdx.get(b.d));
+  flows.forEach(f => { const n = lNode.get(f.o); f.y0 = n.cur; n.cur += f.v * scale; });
+  flows.sort((a,b) => lIdx.get(a.o) - lIdx.get(b.o));
+  flows.forEach(f => { const n = rNode.get(f.d); f.y1 = n.cur; n.cur += f.v * scale; f.h = f.v * scale; });
+
+  svg.innerHTML = "";
+  svg.setAttribute("viewBox", `0 0 ${W} ${H + 20}`);
+  const g = el("g", { transform: "translate(0,10)" }, svg);
+  const x0 = M, x1 = W - M, xm = (x0 + x1) / 2;
+  const ribbons = flows.map(f => {
+    const d = `M${x0},${f.y0} C${xm},${f.y0} ${xm},${f.y1} ${x1},${f.y1} L${x1},${f.y1+f.h} C${xm},${f.y1+f.h} ${xm},${f.y0+f.h} ${x0},${f.y0+f.h}Z`;
+    const p = el("path", { d, fill: lNode.get(f.o).color, opacity, class: "ribbon" }, g);
+    p.addEventListener("mouseenter", () => focus(f.o, f.d, `<b>${f.o}</b> → <b>${f.d}</b>: ${f.v.toLocaleString()} migrants`));
+    p.addEventListener("mouseleave", reset);
+    return { p, f };
+  });
+
+  function focus(o, d, msg) {
+    ribbons.forEach(({p,f}) => p.setAttribute("opacity", (o && f.o === o || d && f.d === d) ? Math.min(0.95, opacity + 0.35) : 0.05));
+    info.innerHTML = msg;
+  }
+  function reset() { ribbons.forEach(({p}) => p.setAttribute("opacity", opacity)); info.textContent = "Hover a country or a ribbon."; }
+
+  const draw = (nodes, isLeft) => nodes.forEach(n => {
+    const x = isLeft ? x0 - NW : x1;
+    const rect = el("rect", { x, y: n.y, width: NW, height: Math.max(n.h, 1), rx: 2, fill: isLeft ? n.color : "var(--muted)", class: "node" }, g);
+    const t = el("text", { x: isLeft ? x - 8 : x + NW + 8, y: n.y + n.h / 2 + 4, "text-anchor": isLeft ? "end" : "start", class: "node" }, g);
+    t.textContent = n.name;
+    const on = () => isLeft ? focus(n.name, null, `<b>${n.name}</b> emigrants (in these corridors): ${fmt(n.v)}`)
+                            : focus(null, n.name, `<b>${n.name}</b> immigrants (in these corridors): ${fmt(n.v)}`);
+    [rect, t].forEach(e => { e.addEventListener("mouseenter", on); e.addEventListener("mouseleave", reset); });
+  });
+  draw(L, true); draw(R, false);
+  el("text", { x: x0 - NW, y: -1, "text-anchor": "end", fill: "var(--muted)", style: "fill:var(--muted)" }, g).textContent = "ORIGIN";
+  el("text", { x: x1, y: -1, style: "fill:var(--muted)" }, g).textContent = "DESTINATION";
+}
+
+// ===== controls =====
+const $ = id => document.getElementById(id);
+$("palette").innerHTML = Object.keys(PALETTES).map(k => `<option>${k}</option>`).join("");
+$("palette").value = CONFIG.palette;
+$("palette").onchange = e => { CONFIG.palette = e.target.value; render(); };
+$("topn").oninput = e => { CONFIG.topN = +e.target.value; $("nv").textContent = e.target.value; render(); };
+$("op").oninput = e => { CONFIG.opacity = e.target.value / 100; render(); };
+$("gap").oninput = e => { CONFIG.gap = +e.target.value; render(); };
+$("theme").onchange = e => { const r = document.documentElement; e.target.value === "auto" ? r.removeAttribute("data-theme") : r.setAttribute("data-theme", e.target.value); };
+render();
+</script>
+</body>
+</html>
